@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>🐑 羊了个羊</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #0a0a1a; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<script>
+// ===== 羊了个羊 - p5.js 消除游戏 =====
+
+let cards = [];
+let slots = [];
+let level = 1;
+let maxLevel = 3;
+let score = 0;
+let steps = 0;
+let timer = 0;
+let gameState = 'menu'; // menu, playing, win, lose
+let selectedSlot = -1;
+let undoStack = [];
+
+// 卡片配置
+const CARD_TYPES = ['🍎','🍊','🍋','🍇','🍓','🍑','🍒','🥝','🍌','🥕','🌽','🍄','🌸','⭐','🎀','💎','🔮','🎯','🧩','🎪'];
+const CARD_COLORS = ['#ff4757','#ff6348','#ffa502','#2ed573','#1e90ff','#a55eea','#ff6b81','#2bcbba','#f7b731','#45aaf2','#20bf6b','#eb3b5a','#fd79a8','#fdcb6e','#6c5ce7','#00b894','#e17055','#0984e3','#d63031','#00cec9'];
+
+function setup() {
+  let w = min(windowWidth, 480);
+  let h = windowHeight;
+  createCanvas(w, h);
+  textFont('sans-serif');
+  resetGame();
+}
+
+function draw() {
+  background(10, 10, 26);
+  
+  // 粒子背景
+  drawParticles();
+  
+  if (gameState === 'menu') {
+    drawMenu();
+  } else if (gameState === 'playing') {
+    if (frameCount % 60 === 0) timer++;
+    drawGame();
+  } else if (gameState === 'win') {
+    drawGame();
+    drawOverlay('🎉 通关!', '#2ed573');
+  } else if (gameState === 'lose') {
+    drawGame();
+    drawOverlay('💔 失败', '#ff4757');
+  }
+}
+
+// ===== 粒子系统 =====
+let particles = [];
+function drawParticles() {
+  if (particles.length < 50) {
+    particles.push({x: random(width), y: random(height), vx: random(-0.3, 0.3), vy: random(-0.5, -0.1), r: random(1, 3), a: random(0.1, 0.4)});
+  }
+  for (let p of particles) {
+    p.x += p.vx; p.y += p.vy;
+    if (p.y < -10) p.y = height + 10;
+    fill(255, 255, 255, p.a * 255);
+    noStroke();
+    circle(p.x, p.y, p.r * 2);
+  }
+}
+
+// ===== 菜单 =====
+function drawMenu() {
+  // 标题
+  textAlign(CENTER, CENTER);
+  textSize(60);
+  fill(255, 215, 0);
+  text('🐑', width/2, height*0.2);
+  textSize(36);
+  fill(255);
+  text('羊了个羊', width/2, height*0.32);
+  
+  textSize(14);
+  fill(180);
+  text('消除游戏 · 三消闯关', width/2, height*0.4);
+  
+  // 开始按钮
+  let btnY = height * 0.55;
+  let btnW = 200, btnH = 50;
+  if (mouseX > width/2 - btnW/2 && mouseX < width/2 + btnW/2 && mouseY > btnY - btnH/2 && mouseY < btnY + btnH/2) {
+    fill(255, 215, 0, 200);
+  } else {
+    fill(255, 215, 0, 150);
+  }
+  rectMode(CENTER);
+  rect(width/2, btnY, btnW, btnH, 12);
+  fill(20);
+  textSize(20);
+  text('开始游戏', width/2, btnY);
+  
+  // 关卡选择
+  textSize(14);
+  fill(180);
+  text('选择难度:', width/2, height*0.68);
+  let levels = ['简单', '中等', '困难'];
+  for (let i = 0; i < 3; i++) {
+    let lx = width/2 + (i-1) * 80;
+    let ly = height * 0.75;
+    let lw = 60, lh = 30;
+    if (level === i+1) fill(255, 215, 0, 200);
+    else fill(100, 100, 140, 150);
+    rect(lx, ly, lw, lh, 8);
+    fill(level === i+1 ? 20 : 200);
+    textSize(13);
+    text(levels[i], lx, ly);
+  }
+  
+  textSize(12);
+  fill(120);
+  text('作者: 超哥 AI 工作室', width/2, height-30);
+}
+
+// ===== 游戏主逻辑 =====
+function drawGame() {
+  // 顶部信息栏
+  fill(20, 20, 50, 200);
+  noStroke();
+  rect(0, 0, width, 50);
+  
+  fill(255);
+  textSize(16);
+  textAlign(LEFT, CENTER);
+  text(`第${level}关`, 15, 25);
+  textAlign(CENTER, CENTER);
+  text(`⏱ ${Math.floor(timer/60)}:${String(timer%60).padStart(2,'0')}`, width/2, 25);
+  textAlign(RIGHT, CENTER);
+  text(`步数: ${steps}`, width-15, 25);
+  
+  // 底部槽位 (7格)
+  let slotY = height - 75;
+  let slotW = 52;
+  let slotGap = 6;
+  let totalW = 7 * slotW + 6 * slotGap;
+  let startX = (width - totalW) / 2 + slotW/2;
+  
+  // 框
+  for (let i = 0; i < 7; i++) {
+    let sx = startX + i * (slotW + slotGap);
+    fill(selectedSlot === i ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.08)');
+    stroke(selectedSlot === i ? '#ffd700' : 'rgba(255,255,255,0.2)');
+    strokeWeight(1.5);
+    rect(sx, slotY, slotW, 58, 6);
+    if (i < slots.length) {
+      noStroke();
+      textAlign(CENTER, CENTER);
+      textSize(28);
+      text(slots[i].type, sx, slotY + 29);
+    }
+  }
+  
+  // 卡片区域
+  let cardAreaY = 60;
+  let cardAreaH = slotY - cardAreaY - 10;
+  
+  for (let i = cards.length - 1; i >= 0; i--) {
+    let c = cards[i];
+    let cx = c.x;
+    let cy = cardAreaY + c.y * (cardAreaH / 6);
+    
+    // 卡片阴影
+    fill(0, 0, 0, 60);
+    noStroke();
+    rect(cx + 2, cy + 2, 40, 40, 6);
+    
+    // 卡片
+    let isOver = mouseX > cx - 20 && mouseX < cx + 20 && mouseY > cy - 20 && mouseY < cy + 20;
+    fill(isOver ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)');
+    stroke('rgba(255,255,255,0.3)');
+    strokeWeight(1);
+    rect(cx, cy, 40, 40, 6);
+    
+    noStroke();
+    textAlign(CENTER, CENTER);
+    textSize(22);
+    text(c.type, cx, cy);
+  }
+  
+  // 底部按钮
+  let btnY = height - 20;
+  let btnW = 70;
+  textAlign(CENTER, CENTER);
+  textSize(13);
+  fill(200, 200, 255, 150);
+  noStroke();
+  rect(30, btnY, btnW, 28, 14);
+  fill(255);
+  text('↩ 撤回', 30, btnY);
+  text('🔀 洗牌', width/2, btnY);
+  rect(width-30, btnY, btnW, 28, 14);
+  fill(255);
+  text('🔄 重开', width-30, btnY);
+}
+
+function drawOverlay(msg, color) {
+  fill(0, 0, 0, 160);
+  noStroke();
+  rect(0, 0, width, height);
+  
+  fill(color);
+  textSize(40);
+  textAlign(CENTER, CENTER);
+  text(msg, width/2, height/2 - 30);
+  
+  fill(255);
+  textSize(14);
+  text('点击继续', width/2, height/2 + 20);
+}
+
+// ===== 游戏逻辑 =====
+function resetGame() {
+  cards = [];
+  slots = [];
+  score = 0;
+  steps = 0;
+  timer = 0;
+  selectedSlot = -1;
+  undoStack = [];
+  generateCards();
+  gameState = 'playing';
+}
+
+function generateCards() {
+  let cardCount = 15 + level * 5; // 20, 25, 30
+  let typesNeeded = 5 + level;
+  let usedTypes = CARD_TYPES.slice(0, typesNeeded);
+  
+  // 确保每个类型是3的倍数
+  let perType = Math.ceil(cardCount / typesNeeded / 3) * 3;
+  let total = perType * typesNeeded;
+  
+  let pool = [];
+  for (let t of usedTypes) {
+    for (let i = 0; i < perType; i++) {
+      pool.push({type: t, x: 0, y: 0});
+    }
+  }
+  shuffle(pool);
+  
+  // 布局 - 多层堆叠
+  let cols = 5 + level;
+  let rows = Math.ceil(pool.length / cols);
+  let startX = (width - cols * 48) / 2 + 24;
+  
+  for (let i = 0; i < pool.length; i++) {
+    let col = i % cols;
+    let row = Math.floor(i / cols);
+    let offsetX = (row % 2) * 20;
+    let offsetY = row * 0.3;
+    pool[i].x = startX + col * 48 + offsetX;
+    pool[i].y = row + offsetY;
+    pool[i].z = row; // 层数
+  }
+  
+  cards = pool;
+}
+
+function mousePressed() {
+  let btnW = 200, btnH = 50;
+  
+  if (gameState === 'menu') {
+    let btnY = height * 0.55;
+    if (mouseX > width/2 - btnW/2 && mouseX < width/2 + btnW/2 && mouseY > btnY - btnH/2 && mouseY < btnY + btnH/2) {
+      resetGame();
+      return;
+    }
+    // 等级选择
+    for (let i = 0; i < 3; i++) {
+      let lx = width/2 + (i-1) * 80;
+      let ly = height * 0.75;
+      if (mouseX > lx - 30 && mouseX < lx + 30 && mouseY > ly - 15 && mouseY < ly + 15) {
+        level = i + 1;
+      }
+    }
+    return;
+  }
+  
+  if (gameState === 'win' || gameState === 'lose') {
+    if (gameState === 'win' && level < maxLevel) {
+      level++;
+      resetGame();
+    } else {
+      level = 1;
+      gameState = 'menu';
+    }
+    return;
+  }
+  
+  // 检查卡片点击
+  // 从最上层开始
+  for (let i = cards.length - 1; i >= 0; i--) {
+    let c = cards[i];
+    let cardAreaH = (height - 75 - 60 - 10);
+    let cy = 60 + c.y * (cardAreaH / 6);
+    if (mouseX > c.x - 20 && mouseX < c.x + 20 && mouseY > cy - 20 && mouseY < cy + 20) {
+      // 检查是否被遮挡 - 上层卡片遮挡
+      let blocked = false;
+      for (let j = cards.length - 1; j > i; j--) {
+        let oc = cards[j];
+        let ocy = 60 + oc.y * (cardAreaH / 6);
+        if (abs(oc.x - c.x) < 40 && abs(ocy - cy) < 40) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) break;
+      
+      // 添加到槽位
+      undoStack.push({cards: JSON.parse(JSON.stringify(cards)), slots: JSON.parse(JSON.stringify(slots))});
+      slots.push({type: c.type});
+      cards.splice(i, 1);
+      steps++;
+      
+      // 检查三消
+      checkMatch();
+      return;
+    }
+  }
+  
+  // 检查槽位点击
+  let slotY = height - 75;
+  let slotW = 52;
+  let slotGap = 6;
+  let totalW = 7 * slotW + 6 * slotGap;
+  let startX = (width - totalW) / 2 + slotW/2;
+  for (let i = 0; i < 7; i++) {
+    let sx = startX + i * (slotW + slotGap);
+    if (mouseX > sx - slotW/2 && mouseX < sx + slotW/2 && mouseY > slotY - 29 && mouseY < slotY + 29) {
+      if (i < slots.length) {
+        selectedSlot = i;
+      }
+      break;
+    }
+  }
+  
+  // 底部按钮
+  if (mouseY > height - 34) {
+    if (mouseX < 65) {
+      // 撤回
+      undoLast();
+    } else if (mouseX > width/2 - 35 && mouseX < width/2 + 35) {
+      // 洗牌
+      shuffle(cards);
+    } else if (mouseX > width - 65) {
+      // 重开
+      resetGame();
+    }
+  }
+}
+
+function checkMatch() {
+  let count = {};
+  for (let s of slots) {
+    count[s.type] = (count[s.type] || 0) + 1;
+  }
+  for (let type in count) {
+    if (count[type] >= 3) {
+      // 消除
+      let removed = 0;
+      slots = slots.filter(s => {
+        if (s.type === type && removed < 3) {
+          removed++;
+          return false;
+        }
+        return true;
+      });
+      score += 10;
+    }
+  }
+  
+  // 检查胜利
+  if (cards.length === 0 && slots.length === 0) {
+    gameState = 'win';
+  }
+  
+  // 检查失败
+  if (slots.length >= 7) {
+    gameState = 'lose';
+  }
+}
+
+function undoLast() {
+  if (undoStack.length > 0) {
+    let last = undoStack.pop();
+    cards = last.cards;
+    slots = last.slots;
+    steps = max(0, steps - 1);
+  }
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    let j = floor(random(i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function windowResized() {
+  let w = min(windowWidth, 480);
+  let h = windowHeight;
+  resizeCanvas(w, h);
+}
+</script>
+</body>
+</html>
